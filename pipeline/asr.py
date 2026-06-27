@@ -105,4 +105,5 @@ def transcribe_local(info: VideoInfo, page: Optional[int] = None) -> SubtitleRes
             pass
     if not segments:
         raise RuntimeError("Whisper 未识别出任何文本")
-    return SubtitleResult(segments=segments, level="whisper", lan_doc="本地Whisper")
+    return SubtitleResult(segments=segments, level="whisper",
+                          lan_doc=f"本地Whisper·{config.WHISPER_MODEL}")

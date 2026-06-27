@@ -71,6 +71,33 @@
 
 ---
 
+## 摘要 + 整理（在上面任一方案后追加）
+
+服务端响应里已带这些顶层字段（同步版直接有；轮询版在最终 `/jobs/<id>` 结果里）：
+
+| 字段 | 内容 |
+|------|------|
+| `message` | 徽标 + 标题 + **摘要**（直接 Show Notification 就能扫一眼判断价值） |
+| `summary` | 纯摘要文本 |
+| `text` | 完整字幕（进剪贴板用） |
+| `filename` | md 文件名，整理时要回传给服务端 |
+
+### 决定价值后：保留 / 删除 / 收藏 / 打标签
+
+在拿到结果、看完摘要后，接着加：
+
+1. **获取词典值（Get Dictionary Value）** 取键 `filename` → **设置变量** `FN`
+2. **从菜单中选取（Choose from Menu）**，四个选项：**保留 / 删除 / 收藏 / 打标签**
+   - **保留**：什么都不做（结束）
+   - **删除**：**获取URL内容** `POST BASE/files/action`，JSON：`filename`=`FN`，`action`=`delete`
+   - **收藏**：同上，`action`=`favorite`（服务端移进 `收藏/` 文件夹）
+   - **打标签**：先 **要求输入（Ask for Input）** 让你输标签名 → **获取URL内容** `POST BASE/files/action`，JSON：`filename`=`FN`，`action`=`tag`，`tag`=刚输入的文本（服务端移进 `<标签>/` 文件夹）
+3. 每个分支后接 **显示通知（Show Notification）** 显示返回的 `message`（如「🗑 已删除」「📁 已移动到「收藏」」）
+
+> 安全：服务端只允许操作输出目录内的文件，自动拦截路径穿越。
+
+---
+
 ## 动作名中英对照速查
 
 | 中文 | English |
@@ -86,6 +113,9 @@
 | 显示通知 | Show Notification |
 | 在共享表单中显示 | Show in Share Sheet |
 | 快捷指令输入 | Shortcut Input |
+| 从菜单中选取 | Choose from Menu |
+| 要求输入 | Ask for Input |
+| 设置剪贴板 | Set Clipboard |
 
 ## 先用电脑验证服务可达
 

@@ -29,7 +29,7 @@ def _safe_filename(name: str, limit: int = 60) -> str:
     return (name[:limit] or "untitled").rstrip(". ")
 
 
-def render_markdown(info: VideoInfo, sub: SubtitleResult) -> str:
+def render_markdown(info: VideoInfo, sub: SubtitleResult, summary: str = "") -> str:
     lines: list[str] = []
     lines.append(f"# {info.title}")
     if info.page_title and info.page_title != info.title:
@@ -42,6 +42,14 @@ def render_markdown(info: VideoInfo, sub: SubtitleResult) -> str:
                  + (f"（{sub.lan_doc}）" if sub.lan_doc else ""))
     lines.append(f"- 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("")
+
+    # 摘要（置顶，方便在 NAS 里扫一眼）
+    if summary:
+        lines.append("## 摘要")
+        lines.append("")
+        lines.append(summary)
+        lines.append("")
+
     lines.append("---")
     lines.append("")
 
@@ -83,8 +91,8 @@ def punctuate(segments) -> str:
     return "".join(parts)
 
 
-def save_markdown(info: VideoInfo, sub: SubtitleResult) -> Path:
-    content = render_markdown(info, sub)
+def save_markdown(info: VideoInfo, sub: SubtitleResult, summary: str = "") -> Path:
+    content = render_markdown(info, sub, summary=summary)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = f"{stamp}_{_safe_filename(info.title)}.md"
     path = config.OUTPUT_DIR / fname

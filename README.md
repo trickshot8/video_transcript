@@ -60,8 +60,9 @@ python server.py
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET  | `/health` | 健康检查 |
-| POST | `/jobs` | 提交任务，body `{"url": "...", "sync": false}`，返回 `job_id` |
+| POST | `/jobs` | 提交任务，body `{"url": "...", "sync": false}`，返回 `job_id`（含 `summary`/`text`/`filename`） |
 | GET  | `/jobs/<job_id>` | 查询状态/结果 |
+| POST | `/files/action` | 整理 md：body `{"filename","action":"keep\|delete\|favorite\|tag","tag"?}` |
 
 `POST /jobs` 加 `"sync": true` 会阻塞直到完成再返回（短视频方便，长视频可能超时）。
 默认异步：先返回 `job_id`，再轮询 `/jobs/<id>` 直到 `status=done`。

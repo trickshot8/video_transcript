@@ -31,6 +31,12 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # 是否启用本地 Whisper 兜底。树莓派等弱算力设备建议关掉（设为 false / 0 / no）
 ENABLE_WHISPER = os.getenv("ENABLE_WHISPER", "true").strip().lower() not in ("0", "false", "no", "")
 
+# ===== 字幕总结（服务端 LLM，默认 DeepSeek，OpenAI 兼容接口）=====
+SUMMARY_ENABLED = os.getenv("SUMMARY_ENABLED", "true").strip().lower() not in ("0", "false", "no", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
+SUMMARY_BASE_URL = os.getenv("SUMMARY_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
+SUMMARY_MODEL = os.getenv("SUMMARY_MODEL", "deepseek-chat").strip()
+
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small").strip()
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu").strip()
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip()

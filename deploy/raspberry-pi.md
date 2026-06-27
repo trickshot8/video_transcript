@@ -22,14 +22,19 @@ W: 根目录 = `/DATA/Documents`，所以之前在 W: 建的 `b站视频字幕` 
 
 （里面已经有之前测试写入的 `.md` 文件。下文用它当 `OUTPUT_HOST_DIR`。）
 
-## 2. 拷贝项目 + 配置
-
-把项目目录拷到 Pi（scp / git / U盘），进入目录，建 `.env`：
+## 2. 克隆项目到 /opt + 配置
 
 ```bash
+sudo git clone https://github.com/trickshot8/bilibili_video_transcript.git /opt/bilibili_video_transcript
+sudo chown -R $USER:$USER /opt/bilibili_video_transcript   # 改属主，后续免 sudo
+cd /opt/bilibili_video_transcript
+
 cp .env.example .env
 nano .env
 ```
+
+> Private 仓库 clone 时会要登录：用户名填 GitHub 名，密码粘 fine-grained PAT
+> （只给本仓库 Contents 读权限即可）。
 
 `.env` 里配：
 
