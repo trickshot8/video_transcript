@@ -9,7 +9,7 @@
 ## 0. 前置
 
 - 树莓派 **64位** 系统 + CasaOS（已自带 Docker）。
-- 确认 Docker 可用：`docker version`、`docker compose version`。
+- 确认 Docker 可用：`docker version`、`sudo docker-compose version`。
 
 ## 1. 找到「被共享成 W: 的那个文件夹」的本地路径
 
@@ -51,8 +51,8 @@ OUTPUT_HOST_DIR=/DATA/Documents/b站视频字幕
 ## 3. 构建并启动
 
 ```bash
-docker compose up -d --build
-docker compose logs -f          # 看日志，Ctrl+C 退出
+sudo docker-compose up -d --build
+sudo docker-compose logs -f          # 看日志，Ctrl+C 退出
 curl http://localhost:8765/health
 ```
 
@@ -81,10 +81,10 @@ curl -X POST http://localhost:8765/jobs \
 ## 常用运维
 
 ```bash
-docker compose restart          # 改了 .env 后重启
-docker compose up -d --build    # 改了代码后重建
-docker compose down             # 停
-docker compose logs --tail=50   # 最近日志
+sudo docker-compose restart          # 改了 .env 后重启
+sudo docker-compose up -d --build    # 改了代码后重建
+sudo docker-compose down             # 停
+sudo docker-compose logs --tail=50   # 最近日志
 ```
 
 ## 关于权限
