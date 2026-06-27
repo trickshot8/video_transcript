@@ -16,7 +16,9 @@ services:
     volumes:
       # 左边 = 树莓派上「被 CasaOS 共享成 W: 的那个本地文件夹」的物理路径。
       # 容器写到这里 = 直接落 Pi 本地 SSD，立刻出现在 W: 和手机共享里。
-      - ${OUTPUT_HOST_DIR:-./output}:/data/subtitles
+      # 用 :? 强制必填——没在 .env 设 OUTPUT_HOST_DIR 就直接报错，
+      # 避免静默回退到 ./output 把字幕写错地方（曾经的坑）。
+      - ${OUTPUT_HOST_DIR:?请在 .env 里设 OUTPUT_HOST_DIR=宿主机输出目录(Docker部署必填)}:/data/subtitles
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8765/health').status==200 else 1)"]
       interval: 30s

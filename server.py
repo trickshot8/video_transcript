@@ -182,4 +182,5 @@ def file_action():
 
 if __name__ == "__main__":
     log.info("启动 video_transcript 服务于 %s:%s", config.HOST, config.PORT)
+    log.info("输出目录 OUTPUT_DIR = %s", config.OUTPUT_DIR)
     app.run(host=config.HOST, port=config.PORT, threaded=True)
