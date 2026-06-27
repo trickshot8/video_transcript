@@ -23,6 +23,8 @@ def main() -> int:
                         help="强制本地Whisper转写（跳过B站字幕，用于对比效果）")
     parser.add_argument("--model", default=None,
                         help="临时覆盖Whisper模型(tiny/base/small/medium/large-v3)，仅在跑Whisper时生效")
+    parser.add_argument("--force", action="store_true",
+                        help="忽略目录去重，强制重新处理（即使之前处理过）")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -33,7 +35,7 @@ def main() -> int:
 
     try:
         result = run(args.url, allow_whisper=not args.no_whisper,
-                     force_whisper=args.force_whisper)
+                     force_whisper=args.force_whisper, force=args.force)
     except Exception as e:  # noqa: BLE001
         print(f"❌ 失败: {e}", file=sys.stderr)
         return 1

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
+from datetime import datetime
 from typing import Optional
 
-from pipeline import asr, bilibili, summarize
+import config
+from pipeline import asr, bilibili, catalog, summarize
 from pipeline.markdown import LEVEL_LABEL, punctuate, save_markdown
 
 log = logging.getLogger("transcript")
@@ -21,18 +22,60 @@ class PipelineResult:
     segment_count: int
     file_path: str
     preview: str             # 纯文本前若干字，给通知用
-    text: str = ""           # 完整字幕纯文本(带标点)，给快捷指令复制用
+    text: str = ""           # 完整字幕(带 metadata 头 + 标点)，给快捷指令复制用
     summary: str = ""        # LLM 摘要（可能为空）
     filename: str = ""       # md 文件名(basename)，给文件整理接口引用
+    duplicate: bool = False  # 命中目录、直接返回的已有结果
     attempts: list[str] = field(default_factory=list)
 
 
+def _video_url(info: bilibili.VideoInfo) -> str:
+    return f"https://www.bilibili.com/video/{info.bvid}"
+
+
+def _with_meta(info: bilibili.VideoInfo, source_label: str, transcript: str) -> str:
+    """给全文加上 metadata 头，喂 LLM 时自带上下文。"""
+    lines = [f"《{info.title}》"]
+    if info.owner:
+        lines.append(f"UP主：{info.owner}")
+    lines.append(f"来源：{_video_url(info)}")
+    lines.append(f"字幕来源：{source_label}")
+    return "\n".join(lines) + "\n\n" + transcript
+
+
+def _result_from_entry(entry: dict, info: bilibili.VideoInfo, path) -> PipelineResult:
+    text = entry.get("text", "")
+    return PipelineResult(
+        title=entry.get("title", info.title),
+        bvid=info.bvid,
+        level=entry.get("level", ""),
+        source_label=entry.get("source_label", ""),
+        segment_count=entry.get("segment_count", 0),
+        file_path=str(path),
+        filename=entry["filename"],
+        summary=entry.get("summary", ""),
+        preview=entry.get("preview", text[:80]),
+        text=text,
+        duplicate=True,
+        attempts=["命中目录，返回已有结果"],
+    )
+
+
 def run(raw_url: str, allow_whisper: bool = True,
-        force_whisper: bool = False) -> PipelineResult:
+        force_whisper: bool = False, force: bool = False) -> PipelineResult:
     attempts: list[str] = []
     vid, page = bilibili.resolve_url(raw_url)
     info = bilibili.get_video_info(vid, page)
     log.info("视频: %s (%s) cid=%s", info.title, info.bvid, info.cid)
+
+    # 去重：查目录，命中且文件还在 → 直接返回已有，不再抓字幕/不再花 DeepSeek
+    if not force and not force_whisper:
+        existing = catalog.get(info.bvid)
+        if existing:
+            path = config.OUTPUT_DIR / (existing.get("folder") or "") / existing["filename"]
+            if path.exists():
+                log.info("命中目录，返回已有: %s", path)
+                return _result_from_entry(existing, info, path)
 
     sub: Optional[bilibili.SubtitleResult] = None
 
@@ -64,21 +107,41 @@ def run(raw_url: str, allow_whisper: bool = True,
             raise RuntimeError("该视频无B站字幕，且本地Whisper转写已关闭")
         raise RuntimeError("未能获取字幕，本地转写也失败。尝试记录: " + "; ".join(attempts))
 
-    full_text = punctuate(sub.segments)  # 带标点，与 markdown 纯文本一致
-    preview = full_text[:80] + ("…" if len(full_text) > 80 else "")
+    transcript = punctuate(sub.segments)            # 纯字幕(带标点)
+    preview = transcript[:80] + ("…" if len(transcript) > 80 else "")
+    source_label = LEVEL_LABEL.get(sub.level, sub.level)
+    full_text = _with_meta(info, source_label, transcript)  # 给复制/LLM 用，带 metadata 头
 
     # 摘要（失败返回空串，不影响主流程）
-    summary = summarize.summarize(info.title, full_text) or ""
+    summary = summarize.summarize(info.title, transcript) or ""
     if summary:
         attempts.append("已生成摘要")
 
     path = save_markdown(info, sub, summary=summary)
 
+    # 写入目录索引（去重 + 检索的单一数据源）
+    catalog.upsert({
+        "video_id": info.bvid,
+        "title": info.title,
+        "owner": info.owner,
+        "source": "bilibili",
+        "url": _video_url(info),
+        "level": sub.level,
+        "source_label": source_label,
+        "segment_count": len(sub.segments),
+        "filename": path.name,
+        "folder": "",
+        "summary": summary,
+        "preview": preview,
+        "text": full_text,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
     return PipelineResult(
         title=info.title,
         bvid=info.bvid,
         level=sub.level,
-        source_label=LEVEL_LABEL.get(sub.level, sub.level),
+        source_label=source_label,
         segment_count=len(sub.segments),
         file_path=str(path),
         filename=path.name,

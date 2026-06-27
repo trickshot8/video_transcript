@@ -19,6 +19,7 @@ from typing import Any
 from flask import Flask, jsonify, request
 
 import config
+from pipeline import catalog
 from pipeline.transcript import run as run_pipeline
 
 logging.basicConfig(level=logging.INFO,
@@ -47,18 +48,20 @@ def _set(job_id: str, **fields):
         _jobs[job_id].update(fields)
 
 
-def _process(job_id: str, url: str):
+def _process(job_id: str, url: str, force: bool = False):
     _set(job_id, status="processing")
     try:
-        result = run_pipeline(url, allow_whisper=config.ENABLE_WHISPER)
+        result = run_pipeline(url, allow_whisper=config.ENABLE_WHISPER, force=force)
         # 按可靠性给每级字幕配徽标，一眼可辨用了哪个 fallback
         badge = {"cc": "🟢", "ai": "🔵", "whisper": "🟡"}.get(result.level, "✅")
-        head = f"{badge} {result.source_label} · {result.segment_count}条\n《{result.title}》"
+        dup = "♻️ 已存在 · " if result.duplicate else ""
+        head = f"{dup}{badge} {result.source_label} · {result.segment_count}条\n《{result.title}》"
         # 通知正文：有摘要就把摘要带上，扫一眼判断价值
         msg = head + (f"\n\n{result.summary}" if result.summary else "")
         # message/text/summary/filename 都放顶层，方便快捷指令直接取用
         _set(job_id, status="done", message=msg, text=result.text,
-             summary=result.summary, filename=result.filename, result={
+             summary=result.summary, filename=result.filename,
+             duplicate=result.duplicate, result={
                 "title": result.title,
                 "bvid": result.bvid,
                 "level": result.level,
@@ -69,6 +72,7 @@ def _process(job_id: str, url: str):
                 "preview": result.preview,
                 "summary": result.summary,
                 "text": result.text,
+                "duplicate": result.duplicate,
                 "attempts": result.attempts,
                 "message": msg,
             })
@@ -94,15 +98,16 @@ def create_job():
     if not url:
         return jsonify(error="缺少 url 参数"), 400
     sync = str(payload.get("sync", request.args.get("sync", ""))).lower() in ("1", "true", "yes")
+    force = str(payload.get("force", request.args.get("force", ""))).lower() in ("1", "true", "yes")
 
     job_id = uuid.uuid4().hex[:12]
     _set(job_id, status="queued", url=url)
 
     if sync:
-        _process(job_id, url)
+        _process(job_id, url, force)
         return jsonify(job_id=job_id, **_jobs[job_id])
 
-    threading.Thread(target=_process, args=(job_id, url), daemon=True).start()
+    threading.Thread(target=_process, args=(job_id, url, force), daemon=True).start()
     return jsonify(job_id=job_id, status="queued"), 202
 
 
@@ -162,6 +167,7 @@ def file_action():
         return jsonify(ok=True, message="✅ 已保留")
     if action == "delete":
         src.unlink()
+        catalog.remove_by_filename(filename)
         log.info("已删除 %s", src.name)
         return jsonify(ok=True, message="🗑 已删除")
     if action == "favorite":
@@ -176,6 +182,7 @@ def file_action():
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
     src.replace(dest)
+    catalog.update_folder(filename, dest_dir.name)
     log.info("已移动 %s -> %s/", src.name, dest_dir.name)
     return jsonify(ok=True, message=f"📁 已移动到「{dest_dir.name}」", path=str(dest))
 
