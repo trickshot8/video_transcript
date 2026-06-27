@@ -123,6 +123,19 @@ def _safe_subdir(name: str) -> str:
     return name[:40] or "未命名"
 
 
+@app.get("/files/folders")
+def list_folders():
+    """列出输出目录下已有的分类文件夹（给快捷指令做"归类"选择用）。"""
+    if not _check_token(request):
+        return jsonify(error="unauthorized"), 401
+    out = config.OUTPUT_DIR.resolve()
+    folders = sorted(
+        p.name for p in out.iterdir()
+        if p.is_dir() and not p.name.startswith(".")
+    )
+    return jsonify(folders=folders)
+
+
 @app.post("/files/action")
 def file_action():
     """整理 md 文件。body: {filename, action: keep|delete|favorite|tag, tag?}"""

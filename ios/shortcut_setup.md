@@ -82,18 +82,31 @@
 | `text` | 完整字幕（进剪贴板用） |
 | `filename` | md 文件名，整理时要回传给服务端 |
 
-### 决定价值后：保留 / 删除 / 收藏 / 打标签
+### 设计：全文自动进剪贴板 + 摘要置顶菜单 + 动态文件夹归类
 
-在拿到结果、看完摘要后，接着加：
+文件去向只有三类：**删除 / 保留 / 归类到文件夹**（"收藏"只是一个叫"收藏"的文件夹；
+打标签 = 归类到对应文件夹）。复制全文是**正交**的——不管去留都有用，所以做成默认行为。
 
-1. **获取词典值（Get Dictionary Value）** 取键 `filename` → **设置变量** `FN`
-2. **从菜单中选取（Choose from Menu）**，四个选项：**保留 / 删除 / 收藏 / 打标签**
-   - **保留**：什么都不做（结束）
-   - **删除**：**获取URL内容** `POST BASE/files/action`，JSON：`filename`=`FN`，`action`=`delete`
-   - **收藏**：同上，`action`=`favorite`（服务端移进 `收藏/` 文件夹）
-   - **打标签**：先 **要求输入（Ask for Input）** 让你输标签名 → **获取URL内容** `POST BASE/files/action`，JSON：`filename`=`FN`，`action`=`tag`，`tag`=刚输入的文本（服务端移进 `<标签>/` 文件夹）
-3. 每个分支后接 **显示通知（Show Notification）** 显示返回的 `message`（如「🗑 已删除」「📁 已移动到「收藏」」）
+拿到结果后依次加：
 
+1. **获取词典值** 取 `text` → **设置剪贴板（Set Clipboard）**　← 全文一回来就进剪贴板
+2. **获取词典值** 取 `summary` → **设置变量** `SUM`
+3. **获取词典值** 取 `filename` → **设置变量** `FN`
+4. **从菜单中选取（Choose from Menu）**，**Prompt（提示）字段填变量 `SUM`**（摘要显示在菜单顶部），三项：
+   - **删除**：`POST BASE/files/action`，JSON `filename`=`FN`、`action`=`delete`
+   - **保留**：结束（全文已在剪贴板）
+   - **归类**：进入下面的子流程
+
+#### 「归类」子流程（选已有文件夹 / 新建）
+
+1. **获取URL内容** `GET BASE/files/folders` → **获取词典值** 取 `folders`
+2. **设置变量** `LIST` = 上一步的 folders；再 **添加到变量（Add to Variable）** `LIST` 一项文本 `➕ 新建文件夹`
+3. **从列表中选取（Choose from List）** `LIST` → **设置变量** `PICK`
+4. **如果（If）** `PICK` 是 `➕ 新建文件夹`：**要求输入（Ask for Input）** 文件夹名 → 重设 `PICK` 为输入
+5. **获取URL内容** `POST BASE/files/action`，JSON：`filename`=`FN`、`action`=`tag`、`tag`=`PICK`
+6. **显示通知** 返回的 `message`（📁 已移动到「xxx」）
+
+> `tag` 动作 = 移进 `<tag>/` 文件夹，不存在自动新建。第一次输个新名，以后就出现在 `folders` 列表里。
 > 安全：服务端只允许操作输出目录内的文件，自动拦截路径穿越。
 
 ---
@@ -114,6 +127,8 @@
 | 在共享表单中显示 | Show in Share Sheet |
 | 快捷指令输入 | Shortcut Input |
 | 从菜单中选取 | Choose from Menu |
+| 从列表中选取 | Choose from List |
+| 添加到变量 | Add to Variable |
 | 要求输入 | Ask for Input |
 | 设置剪贴板 | Set Clipboard |
 
