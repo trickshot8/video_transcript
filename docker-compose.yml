@@ -1,0 +1,24 @@
+services:
+  video_transcript:
+    build: .
+    image: video_transcript:lite
+    container_name: video_transcript
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    # .env 提供 BILIBILI_SESSDATA / API_TOKEN 等；
+    # 下面的 environment 会覆盖 .env 里的 Windows 专属项(如 OUTPUT_DIR)。
+    env_file:
+      - .env
+    environment:
+      ENABLE_WHISPER: "false"
+      OUTPUT_DIR: /data/subtitles
+    volumes:
+      # 左边 = 树莓派上「被 CasaOS 共享成 W: 的那个本地文件夹」的物理路径。
+      # 容器写到这里 = 直接落 Pi 本地 SSD，立刻出现在 W: 和手机共享里。
+      - ${OUTPUT_HOST_DIR:-./output}:/data/subtitles
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8765/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

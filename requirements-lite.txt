@@ -1,0 +1,5 @@
+# 树莓派/弱算力设备用：关闭本地 Whisper（.env 设 ENABLE_WHISPER=false）时的精简依赖。
+# 不含 faster-whisper / ctranslate2 / yt-dlp（避免 ARM 上的编译麻烦）。
+flask>=3.0.0
+requests>=2.31
+python-dotenv>=1.0.0

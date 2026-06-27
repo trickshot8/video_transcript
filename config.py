@@ -1,0 +1,40 @@
+"""集中读取配置（来自环境变量 / .env）。"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Windows 控制台默认 GBK，输出 emoji/特殊字符会 UnicodeEncodeError，统一切到 UTF-8
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
+
+BASE_DIR = Path(__file__).resolve().parent
+
+BILIBILI_SESSDATA = os.getenv("BILIBILI_SESSDATA", "").strip()
+
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", "8765"))
+API_TOKEN = os.getenv("API_TOKEN", "").strip()
+
+_output = os.getenv("OUTPUT_DIR", "output").strip()
+OUTPUT_DIR = Path(_output) if os.path.isabs(_output) else BASE_DIR / _output
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 是否启用本地 Whisper 兜底。树莓派等弱算力设备建议关掉（设为 false / 0 / no）
+ENABLE_WHISPER = os.getenv("ENABLE_WHISPER", "true").strip().lower() not in ("0", "false", "no", "")
+
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small").strip()
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu").strip()
+WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip()
+
+# 临时音频下载目录
+TMP_DIR = BASE_DIR / ".tmp"
+TMP_DIR.mkdir(parents=True, exist_ok=True)

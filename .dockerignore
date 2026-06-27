@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.tmp/
+output/
+.git/
+.env
+.env.example
+deploy/
+*.md
