@@ -4,7 +4,9 @@
 （Windows 映射为 `W:`，手机也连同一共享）。服务在同一台 Pi 上跑 Docker，
 **直接写本地共享文件夹**——不需要 cifs/NAS 挂载。
 
-精简模式：只跑 B站 CC/AI 字幕（关闭本地 Whisper）。
+精简模式：关闭本地 Whisper（弱算力设备跑不动），保留 B站/YouTube 平台字幕、
+DeepSeek 摘要、云端 ASR 兜底（SenseVoiceSmall，免费、中文强）——这几个都只是
+发 HTTP 请求，对 Pi 几乎零负担。
 
 ## 0. 前置
 
@@ -24,29 +26,38 @@ W: 根目录 = `/DATA/Documents`，所以之前在 W: 建的 `b站视频字幕` 
 
 ## 2. 克隆项目到 /opt + 配置
 
+仓库是 Public，clone 不需要任何登录：
+
 ```bash
-sudo git clone https://github.com/trickshot8/bilibili_video_transcript.git /opt/bilibili_video_transcript
-sudo chown -R $USER:$USER /opt/bilibili_video_transcript   # 改属主，后续免 sudo
-cd /opt/bilibili_video_transcript
+sudo git clone https://github.com/trickshot8/video_transcript.git /opt/video_transcript
+sudo chown -R $USER:$USER /opt/video_transcript   # 改属主，后续免 sudo
+cd /opt/video_transcript
 
 cp .env.example .env
 nano .env
 ```
 
-> Private 仓库 clone 时会要登录：用户名填 GitHub 名，密码粘 fine-grained PAT
-> （只给本仓库 Contents 读权限即可）。
-
-`.env` 里配：
+`.env` 里至少配：
 
 ```ini
 BILIBILI_SESSDATA=你的SESSDATA
 ENABLE_WHISPER=false
 # 本地共享文件夹路径（W: 根=/DATA/Documents）
 OUTPUT_HOST_DIR=/DATA/Documents/b站视频字幕
+
+# 摘要（DeepSeek，platform.deepseek.com 申请，需实名）
+DEEPSEEK_API_KEY=你的key
+
+# 云 ASR 兜底（硅基流动 SenseVoiceSmall，siliconflow.cn 申请，免费）
+ASR_API_KEY=你的key
 ```
 
 > 容器内 `OUTPUT_DIR` 由 compose 强制为 `/data/subtitles`，并把 `OUTPUT_HOST_DIR`
 > bind-mount 过去。写进去 = 直接落本地 SSD = 立刻出现在 W: 和手机共享里。
+>
+> 想用 YouTube cookies 缓解偶发 429：把 `cookies/youtube.txt` 放进项目根目录
+> （compose 已挂载该目录），`.env` 设 `YOUTUBE_COOKIES=/app/cookies/youtube.txt`。
+> 没放文件也不报错，纯可选。
 
 ## 3. 构建并启动
 
@@ -81,8 +92,9 @@ curl -X POST http://localhost:8765/jobs \
 ## 常用运维
 
 ```bash
-sudo docker-compose restart          # 改了 .env 后重启
-sudo docker-compose up -d --build    # 改了代码后重建
+git pull                             # 拉最新代码（.env 不受影响，不在仓库里）
+sudo docker-compose restart          # 只改了 .env 时重启
+sudo docker-compose up -d --build    # 改了代码/依赖后重建
 sudo docker-compose down             # 停
 sudo docker-compose logs --tail=50   # 最近日志
 ```
@@ -95,5 +107,7 @@ sudo docker-compose logs --tail=50   # 最近日志
 
 ## 无字幕视频
 
-精简模式遇到 ~25% 无 CC/AI 字幕的视频（多为游戏/音乐/鬼畜），回执
-`❌ 该视频无B站字幕，且本地Whisper转写已关闭`。要救这部分可后续接云 ASR API。
+平台无字幕（B站约25%、多为游戏/音乐/鬼畜；YouTube 视具体频道而异）时，
+若已配置 `ASR_API_KEY`，会自动降级到云端 SenseVoiceSmall 转写，再生成摘要——
+对 Pi 来说只是发个 HTTP 请求，不占算力。没配 `ASR_API_KEY` 且
+`ENABLE_WHISPER=false` 时，会直接回执"无可用字幕"。

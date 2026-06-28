@@ -73,28 +73,62 @@ python server.py
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET  | `/health` | 健康检查 |
-| POST | `/jobs` | 提交任务，body `{"url": "...", "sync": false}` |
-| GET  | `/jobs/<job_id>` | 查询状态与结果 |
-| POST | `/files/action` | 整理 md 文件 |
+| POST | `/jobs` | 提交任务，body `{"url": "...", "sync": false, "force": false}`，返回 `job_id` |
+| GET  | `/jobs/<job_id>` | 查询状态与结果（含 `message`/`summary`/`text`/`filename`/`duplicate`） |
+| GET  | `/files/folders` | 列出输出目录下已有的分类文件夹（给整理菜单用） |
+| POST | `/files/action` | 整理 md：`{"filename","action":"keep\|delete\|favorite\|tag","tag"?}` |
+
+`POST /jobs` 加 `"sync": true` 会阻塞直到处理完成再返回；加 `"force": true` 会忽略目录去重，强制重新处理。
 
 如果 `.env` 设了 `API_TOKEN`，请求需带 `?token=xxx` 或 header `X-Token`。
 
 ## 输出
 
-markdown 落在 `output/`，包含：
+markdown 落在 `OUTPUT_DIR`，包含：
 
-- 视频标题 / 来源
-- 带时间戳字幕
-- 纯文本字幕
-- 可选摘要
+- 视频标题 / 来源 / UP主或频道
+- 带时间戳字幕（云 ASR 单段结果无逐句时间戳，自动跳过该区块）
+- 纯文本字幕（按停顿自动补标点）
+- 可选摘要（DeepSeek 生成，置顶显示）
 
-每次实际处理还会在 `_catalog.json` 的 `processing_runs` 中记录各阶段耗时、模型、后端、设备架构和输入规模，单个视频保留最近 20 次。需要比较不同设备时，可在 `.env` 设置易读标签：
+### 目录索引与去重
+
+`OUTPUT_DIR/_catalog.json` 是一个纯索引文件：记录每个视频的元数据、摘要和文件名指针，
+**不存全文**（全文只在各自的 `.md` 里，避免索引随视频数膨胀）。处理前会先查这个索引，
+命中且文件还在就直接返回已有结果（不再抓字幕、不再调摘要 API），响应里 `duplicate: true`。
+想强制重跑用 `force`（`cli.py --force` 或请求体 `"force": true`）。
+整理（移动/删除）文件时会同步更新索引。
+
+### 文件整理（保留 / 删除 / 归类）
+
+`/files/action` 把 md 文件做三类处理：`delete`（删除）、`keep`（不动）、`tag`（移进
+`<tag>/` 子文件夹，不存在会自动创建；"收藏"也只是叫"收藏"的子文件夹）。
+`/files/folders` 列出已有子文件夹，方便客户端做"选已有 / 新建"的归类菜单
+（具体快捷指令搭法见 [ios/shortcut_setup.md](ios/shortcut_setup.md)）。
+
+### 性能日志（可选，非必须）
+
+每次实际处理（非去重命中）会在 `OUTPUT_DIR/_perf.jsonl` 追加一行 JSON，记录各阶段耗时、
+模型、后端、设备架构和输入规模——纯日志性质，与 `_catalog.json` 完全分离，不影响索引体积。
+需要比较不同设备时，可在 `.env` 设置易读标签：
 
 ```env
 PERF_HOST_LABEL=pi5
 ```
 
-使用 `force` 重新处理同一视频即可积累可比较的运行记录；命中去重缓存不会新增记录。
+## YouTube 支持
+
+链接里含 `youtube.com` / `youtu.be` 会自动路由到 YouTube 抓取逻辑，无需额外配置；
+iOS 快捷指令完全不用区分平台，同一套流程两边都能用。字幕优先级：
+
+1. 人工字幕（中文优先，否则视频原语言）
+2. 自动字幕（**只取原语言**，不强求自动翻译成中文——YouTube 对翻译字幕限流很狠，
+   原生语言字幕能稳定下载；摘要始终由 DeepSeek 生成中文，与字幕本身的语言无关）
+3. 云 ASR / 本地 Whisper 兜底（同 B站）
+
+如果某个视频仍频繁 429，可在项目根目录建 `cookies/youtube.txt`
+（Netscape 格式，用浏览器扩展如「Get cookies.txt LOCALLY」登录后导出），
+`.env` 设 `YOUTUBE_COOKIES` 指向它即可（Docker 部署时 compose 已把 `./cookies` 挂进容器）。
 
 ## iOS 快捷指令
 
