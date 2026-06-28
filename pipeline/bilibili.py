@@ -14,7 +14,7 @@ from urllib.parse import urlparse, parse_qs
 import requests
 
 import config
-from pipeline import catalog, wbi
+from pipeline import wbi
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -69,18 +69,14 @@ def resolve_url(raw: str) -> tuple[str, Optional[int]]:
     """
     raw = raw.strip()
     page: Optional[int] = None
-    code: Optional[str] = None
 
     # 先把分享文案里的短链拎出来并展开
     m = B23_RE.search(raw)
     if m:
         short = m.group(0).rstrip("）)】」]>，,。.")
-        code = short.rsplit("/", 1)[-1]
-        cached = catalog.get_shortlink(code)
-        if cached:                      # 缓存命中：直接返回，省掉整次网络展开
-            return cached["bvid"], cached.get("page")
         try:
-            # 只读重定向目标(Location)，**不下载笨重的视频页 HTML**——快很多
+            # 只读重定向目标(Location)，**不下载笨重的视频页 HTML**——快很多。
+            # （短码缓存试过：B站每次分享给新短码，命不中，且会反复重写目录文件，故不做。）
             resp = _session().get(short, allow_redirects=False, timeout=15)
             raw = resp.headers.get("Location") or resp.url
         except requests.RequestException:
@@ -96,17 +92,12 @@ def resolve_url(raw: str) -> tuple[str, Optional[int]]:
 
     bv = BV_RE.search(raw)
     if bv:
-        vid = bv.group(1)
-    else:
-        av = AV_RE.search(raw)
-        if av:
-            vid = f"av{av.group(1)}"
-        else:
-            raise ValueError(f"无法从输入中识别 B 站视频 ID: {raw!r}")
+        return bv.group(1), page
+    av = AV_RE.search(raw)
+    if av:
+        return f"av{av.group(1)}", page
 
-    if code:                            # 缓存短码 -> BV，下次同一短链秒解析
-        catalog.put_shortlink(code, vid, page)
-    return vid, page
+    raise ValueError(f"无法从输入中识别 B 站视频 ID: {raw!r}")
 
 
 def get_video_info(vid: str, page: Optional[int] = None) -> VideoInfo:
