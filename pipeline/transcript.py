@@ -30,15 +30,28 @@ class PipelineResult:
     attempts: list[str] = field(default_factory=list)
 
 
+def _meta_header(title: str, owner: str, source: str, url: str, source_label: str) -> str:
+    owner_label = "UP主" if source == "bilibili" else "频道"
+    lines = [f"《{title}》"]
+    if owner:
+        lines.append(f"{owner_label}：{owner}")
+    lines.append(f"来源：{url}")
+    lines.append(f"字幕来源：{source_label}")
+    return "\n".join(lines) + "\n\n"
+
+
 def _with_meta(info: VideoInfo, source_label: str, transcript: str) -> str:
     """给全文加上 metadata 头，喂 LLM 时自带上下文。"""
-    owner_label = "UP主" if info.source == "bilibili" else "频道"
-    lines = [f"《{info.title}》"]
-    if info.owner:
-        lines.append(f"{owner_label}：{info.owner}")
-    lines.append(f"来源：{info.url}")
-    lines.append(f"字幕来源：{source_label}")
-    return "\n".join(lines) + "\n\n" + transcript
+    return _meta_header(info.title, info.owner, info.source, info.url, source_label) + transcript
+
+
+def _read_transcript(path) -> str:
+    """从已生成的 .md 里抽出纯文本(字幕正文)。全文只存 md，不进目录索引。"""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return content.split("## 纯文本", 1)[1].strip() if "## 纯文本" in content else ""
 
 
 def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[PipelineResult]:
@@ -51,7 +64,11 @@ def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[Pipeline
     path = config.OUTPUT_DIR / (entry.get("folder") or "") / entry["filename"]
     if not path.exists():
         return None
-    text = entry.get("text", "")
+    # 全文不在索引里，从 .md 读回再拼上 metadata 头
+    transcript = _read_transcript(path)
+    text = _meta_header(entry.get("title", ""), entry.get("owner", ""),
+                        entry.get("source", ""), entry.get("url", ""),
+                        entry.get("source_label", "")) + transcript
     return PipelineResult(
         title=entry.get("title", ""),
         video_id=video_id,
@@ -61,7 +78,7 @@ def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[Pipeline
         file_path=str(path),
         filename=entry["filename"],
         summary=entry.get("summary", ""),
-        preview=entry.get("preview", text[:80]),
+        preview=entry.get("preview", transcript[:80]),
         text=text,
         duplicate=True,
         attempts=["命中目录，返回已有结果"],
@@ -138,7 +155,7 @@ def run(raw_url: str, allow_whisper: bool = True,
 
     path = save_markdown(info, sub, summary=summary)
 
-    # 写入目录索引（去重 + 检索的单一数据源）
+    # 写入目录索引——只存元数据 + 摘要，**全文不进索引**(留在 .md)，索引保持轻量
     catalog.upsert({
         "video_id": info.video_id,
         "title": info.title,
@@ -152,7 +169,6 @@ def run(raw_url: str, allow_whisper: bool = True,
         "folder": "",
         "summary": summary,
         "preview": preview,
-        "text": full_text,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
