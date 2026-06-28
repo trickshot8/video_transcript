@@ -57,6 +57,19 @@ def update_folder(filename: str, folder: str) -> None:
         _write(data)
 
 
+def get_shortlink(code: str) -> dict | None:
+    """b23 短码 -> {bvid, page} 缓存，省去重复的短链展开网络请求。"""
+    with _lock:
+        return _load().get("shortlinks", {}).get(code)
+
+
+def put_shortlink(code: str, bvid: str, page) -> None:
+    with _lock:
+        data = _load()
+        data.setdefault("shortlinks", {})[code] = {"bvid": bvid, "page": page}
+        _write(data)
+
+
 def remove_by_filename(filename: str) -> None:
     """文件被删除后，移除对应条目。"""
     with _lock:
