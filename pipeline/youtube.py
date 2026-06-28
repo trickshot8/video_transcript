@@ -82,29 +82,47 @@ def get_video_info(video_id: str) -> VideoInfo:
     )
 
 
-def _pick_lang(captions: dict) -> Optional[str]:
-    """从 {lang: [...]} 里按优先级挑一个中文语言码。"""
-    for lang in _ZH_LANGS:
-        if captions.get(lang):
+def _first_present(captions: dict, langs: list[str]) -> Optional[str]:
+    for lang in langs:
+        if lang and captions.get(lang):
+            return lang
+    return None
+
+
+def _native_auto_lang(autos: dict) -> Optional[str]:
+    """自动字幕里挑"原生"(非翻译)语言：其格式 URL 不带 tlang= 的那个。"""
+    for lang, fmts in autos.items():
+        if any("tlang=" not in (f.get("url") or "") for f in fmts):
             return lang
     return None
 
 
 def fetch_subtitle(info: VideoInfo) -> Optional[SubtitleResult]:
-    """人工中文优先(cc)，其次自动/自动翻译中文(ai)。用 yt-dlp 下载字幕避开限流。"""
-    raw = _extract(info.video_id)
-    lang = _pick_lang(raw.get("subtitles") or {})
-    level = "cc"
-    if lang is None:
-        lang = _pick_lang(raw.get("automatic_captions") or {})
-        level = "ai"
-    if lang is None:
-        return None
+    """按"原语言"取字幕，避开 YouTube 对自动翻译(tlang)的强限流。
 
-    segments = _download_and_parse(info.video_id, lang, manual=(level == "cc"))
-    if not segments:
-        return None
-    return SubtitleResult(segments=segments, level=level, lan_doc=f"YouTube {lang}")
+    人工字幕：中文优先 > 视频原语言 > 任意。
+    自动字幕：只取原语言(native，不翻译)——中文视频原语言即中文。
+    摘要由上层用 DeepSeek 生成，始终中文，与字幕语言无关。
+    """
+    raw = _extract(info.video_id)
+    manual = raw.get("subtitles") or {}
+    autos = raw.get("automatic_captions") or {}
+    orig = raw.get("language") or ""
+
+    # 1. 人工字幕（创作者上传，准确，无翻译限流问题）
+    lang = _first_present(manual, _ZH_LANGS + [orig] + sorted(manual.keys()))
+    if lang:
+        segs = _download_and_parse(info.video_id, lang, manual=True)
+        if segs:
+            return SubtitleResult(segs, "cc", f"YouTube {lang}")
+
+    # 2. 自动字幕，只取原语言(native)
+    auto_lang = orig if autos.get(orig) else _native_auto_lang(autos)
+    if auto_lang:
+        segs = _download_and_parse(info.video_id, auto_lang, manual=False)
+        if segs:
+            return SubtitleResult(segs, "ai", f"YouTube {auto_lang}(自动)")
+    return None
 
 
 def _download_and_parse(video_id: str, lang: str, manual: bool) -> list[Segment]:
