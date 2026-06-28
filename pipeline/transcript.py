@@ -43,11 +43,20 @@ def _with_meta(info: bilibili.VideoInfo, source_label: str, transcript: str) -> 
     return "\n".join(lines) + "\n\n" + transcript
 
 
-def _result_from_entry(entry: dict, info: bilibili.VideoInfo, path) -> PipelineResult:
+def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[PipelineResult]:
+    """查目录，命中且文件还在就返回已有结果；否则 None。纯本地、不联网。"""
+    if force or force_whisper:
+        return None
+    entry = catalog.get(video_id)
+    if not entry:
+        return None
+    path = config.OUTPUT_DIR / (entry.get("folder") or "") / entry["filename"]
+    if not path.exists():
+        return None
     text = entry.get("text", "")
     return PipelineResult(
-        title=entry.get("title", info.title),
-        bvid=info.bvid,
+        title=entry.get("title", ""),
+        bvid=video_id,
         level=entry.get("level", ""),
         source_label=entry.get("source_label", ""),
         segment_count=entry.get("segment_count", 0),
@@ -65,17 +74,21 @@ def run(raw_url: str, allow_whisper: bool = True,
         force_whisper: bool = False, force: bool = False) -> PipelineResult:
     attempts: list[str] = []
     vid, page = bilibili.resolve_url(raw_url)
+
+    # 早去重：resolve 已拿到 BV 号，直接查本地目录，命中就返回——**不调 view API、不联网**
+    hit = _dedup(vid, force, force_whisper)
+    if hit:
+        log.info("命中目录(早)，跳过取信息: %s", vid)
+        return hit
+
     info = bilibili.get_video_info(vid, page)
     log.info("视频: %s (%s) cid=%s", info.title, info.bvid, info.cid)
 
-    # 去重：查目录，命中且文件还在 → 直接返回已有，不再抓字幕/不再花 DeepSeek
-    if not force and not force_whisper:
-        existing = catalog.get(info.bvid)
-        if existing:
-            path = config.OUTPUT_DIR / (existing.get("folder") or "") / existing["filename"]
-            if path.exists():
-                log.info("命中目录，返回已有: %s", path)
-                return _result_from_entry(existing, info, path)
+    # 兜底再查一次：处理 av 号等 vid != 规范 bvid 的情况
+    hit = _dedup(info.bvid, force, force_whisper)
+    if hit:
+        log.info("命中目录，返回已有: %s", info.bvid)
+        return hit
 
     sub: Optional[bilibili.SubtitleResult] = None
 
