@@ -4,6 +4,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # 仅装精简依赖（flask/requests/dotenv），不含 faster-whisper/ctranslate2/yt-dlp
 COPY requirements-lite.txt .
 RUN pip install --no-cache-dir -r requirements-lite.txt

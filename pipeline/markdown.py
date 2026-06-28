@@ -1,4 +1,4 @@
-"""把字幕片段渲染成 markdown 并落盘。"""
+"""Render subtitle segments to markdown and save them."""
 from __future__ import annotations
 
 import re
@@ -8,10 +8,19 @@ from pathlib import Path
 import config
 from pipeline.models import Segment, SubtitleResult, VideoInfo
 
-# 来源 + 级别 -> 中文标签
 _LABELS = {
-    "bilibili": {"cc": "B站CC字幕(人工)", "ai": "B站AI字幕", "whisper": "本地Whisper转写"},
-    "youtube": {"cc": "YouTube字幕", "ai": "YouTube自动字幕", "whisper": "本地Whisper转写"},
+    "bilibili": {
+        "cc": "B站CC字幕(人工)",
+        "ai": "B站AI字幕",
+        "api": "SenseVoiceSmall API转写",
+        "whisper": "本地Whisper转写",
+    },
+    "youtube": {
+        "cc": "YouTube字幕",
+        "ai": "YouTube自动字幕",
+        "api": "SenseVoiceSmall API转写",
+        "whisper": "本地Whisper转写",
+    },
 }
 
 
@@ -42,12 +51,10 @@ def render_markdown(info: VideoInfo, sub: SubtitleResult, summary: str = "") -> 
     lines.append(f"- 视频: {info.url}")
     if info.owner:
         lines.append(f"- {'UP主' if info.source == 'bilibili' else '频道'}: {info.owner}")
-    lines.append(f"- 字幕来源: {label(info.source, sub.level)}"
-                 + (f"（{sub.lan_doc}）" if sub.lan_doc else ""))
+    lines.append(f"- 字幕来源: {label(info.source, sub.level)}" + (f"（{sub.lan_doc}）" if sub.lan_doc else ""))
     lines.append(f"- 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("")
 
-    # 摘要（置顶，方便在 NAS 里扫一眼）
     if summary:
         lines.append("## 摘要")
         lines.append("")
@@ -56,15 +63,12 @@ def render_markdown(info: VideoInfo, sub: SubtitleResult, summary: str = "") -> 
 
     lines.append("---")
     lines.append("")
-
-    # 带时间戳的逐条字幕
     lines.append("## 带时间戳字幕")
     lines.append("")
     for seg in sub.segments:
         lines.append(f"`[{_ts(seg.start)}]` {seg.text}")
     lines.append("")
 
-    # 纯文本（按停顿补标点，便于阅读 / 喂给 LLM 做总结）
     lines.append("## 纯文本")
     lines.append("")
     lines.append(punctuate(sub.segments))
@@ -72,14 +76,11 @@ def render_markdown(info: VideoInfo, sub: SubtitleResult, summary: str = "") -> 
     return "\n".join(lines)
 
 
-# 停顿阈值（秒）：大于句号阈值断句，大于逗号阈值断句为逗号，否则也补逗号保证可读
 _PERIOD_GAP = 1.0
-_COMMA_GAP = 0.3
 _STRIP = "，。、！？!?,. "
 
 
-def punctuate(segments) -> str:
-    """B站AI字幕不带标点，依据相邻字幕的时间间隔补中文标点。"""
+def punctuate(segments: list[Segment]) -> str:
     parts: list[str] = []
     n = len(segments)
     for i, seg in enumerate(segments):

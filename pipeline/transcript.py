@@ -1,4 +1,4 @@
-"""多来源编排：B站 / YouTube → CC字幕 → 自动字幕 → 本地Whisper。"""
+"""Multi-source transcript pipeline: platform subtitles -> API ASR -> local Whisper."""
 from __future__ import annotations
 
 import logging
@@ -18,15 +18,15 @@ log = logging.getLogger("transcript")
 class PipelineResult:
     title: str
     video_id: str
-    level: str               # cc / ai / whisper
+    level: str
     source_label: str
     segment_count: int
     file_path: str
-    preview: str             # 纯文本前若干字，给通知用
-    text: str = ""           # 完整字幕(带 metadata 头 + 标点)，给快捷指令复制用
-    summary: str = ""        # LLM 摘要（可能为空）
-    filename: str = ""       # md 文件名(basename)，给文件整理接口引用
-    duplicate: bool = False  # 命中目录、直接返回的已有结果
+    preview: str
+    text: str = ""
+    summary: str = ""
+    filename: str = ""
+    duplicate: bool = False
     attempts: list[str] = field(default_factory=list)
 
 
@@ -41,12 +41,10 @@ def _meta_header(title: str, owner: str, source: str, url: str, source_label: st
 
 
 def _with_meta(info: VideoInfo, source_label: str, transcript: str) -> str:
-    """给全文加上 metadata 头，喂 LLM 时自带上下文。"""
     return _meta_header(info.title, info.owner, info.source, info.url, source_label) + transcript
 
 
 def _read_transcript(path) -> str:
-    """从已生成的 .md 里抽出纯文本(字幕正文)。全文只存 md，不进目录索引。"""
     try:
         content = path.read_text(encoding="utf-8")
     except OSError:
@@ -55,7 +53,6 @@ def _read_transcript(path) -> str:
 
 
 def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[PipelineResult]:
-    """查目录，命中且文件还在就返回已有结果；否则 None。纯本地、不联网。"""
     if force or force_whisper:
         return None
     entry = catalog.get(video_id)
@@ -64,11 +61,15 @@ def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[Pipeline
     path = config.OUTPUT_DIR / (entry.get("folder") or "") / entry["filename"]
     if not path.exists():
         return None
-    # 全文不在索引里，从 .md 读回再拼上 metadata 头
+
     transcript = _read_transcript(path)
-    text = _meta_header(entry.get("title", ""), entry.get("owner", ""),
-                        entry.get("source", ""), entry.get("url", ""),
-                        entry.get("source_label", "")) + transcript
+    text = _meta_header(
+        entry.get("title", ""),
+        entry.get("owner", ""),
+        entry.get("source", ""),
+        entry.get("url", ""),
+        entry.get("source_label", ""),
+    ) + transcript
     return PipelineResult(
         title=entry.get("title", ""),
         video_id=video_id,
@@ -86,22 +87,28 @@ def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[Pipeline
 
 
 def _route(raw_url: str):
-    """来源路由 → (video_id, page, get_info_fn, fetch_fn)。"""
     if youtube.is_youtube(raw_url):
         vid = youtube.extract_id(raw_url)
         return vid, None, youtube.get_video_info, youtube.fetch_subtitle
     vid, page = bilibili.resolve_url(raw_url)
-    return (vid, page,
-            lambda v: bilibili.get_video_info(v, page),
-            bilibili.fetch_bilibili_subtitle)
+    return (
+        vid,
+        page,
+        lambda v: bilibili.get_video_info(v, page),
+        bilibili.fetch_bilibili_subtitle,
+    )
 
 
-def run(raw_url: str, allow_whisper: bool = True,
-        force_whisper: bool = False, force: bool = False) -> PipelineResult:
+def run(
+    raw_url: str,
+    allow_api_asr: bool = True,
+    allow_local_whisper: bool = True,
+    force_whisper: bool = False,
+    force: bool = False,
+) -> PipelineResult:
     attempts: list[str] = []
     vid, page, get_info, fetch = _route(raw_url)
 
-    # 早去重：用解析出的 ID 直接查本地目录，命中就返回——不取信息、尽量不联网
     hit = _dedup(vid, force, force_whisper)
     if hit:
         log.info("命中目录(早)，跳过取信息: %s", vid)
@@ -110,10 +117,9 @@ def run(raw_url: str, allow_whisper: bool = True,
     info: VideoInfo = get_info(vid)
     log.info("视频[%s]: %s (%s)", info.source, info.title, info.video_id)
 
-    # 兜底再查一次：处理 ID 规范化后不同的情况（如 av 号）
     hit = _dedup(info.video_id, force, force_whisper)
     if hit:
-        log.info("命中目录，返回已有: %s", info.video_id)
+        log.info("命中目录，返回已有结果: %s", info.video_id)
         return hit
 
     sub: Optional[SubtitleResult] = None
@@ -123,39 +129,46 @@ def run(raw_url: str, allow_whisper: bool = True,
         sub = asr.transcribe_local(info, page)
         attempts.append("强制本地Whisper转写")
     else:
-        # 1+2 级：平台字幕（内部已优先人工，其次自动）
         try:
             sub = fetch(info)
-            attempts.append(f"{info.source}{sub.level}字幕命中" if sub
-                            else f"{info.source}无可用字幕")
-        except Exception as e:  # noqa: BLE001  网络/接口异常都降级
+            attempts.append(
+                f"{info.source}{sub.level}字幕命中" if sub else f"{info.source}无可用字幕"
+            )
+        except Exception as e:  # noqa: BLE001
             attempts.append(f"字幕抓取异常: {e}")
             log.warning("字幕抓取异常: %s", e)
 
-        # 3 级：本地 whisper
-        if sub is None and allow_whisper:
+        if sub is None and allow_api_asr:
+            if asr.api_available():
+                try:
+                    log.info("降级到云端 ASR API 转写…")
+                    sub = asr.transcribe_api(info, page)
+                    attempts.append("SenseVoiceSmall API转写完成")
+                except Exception as e:  # noqa: BLE001
+                    attempts.append(f"ASR API转写异常: {e}")
+                    log.warning("ASR API转写异常: %s", e)
+            else:
+                attempts.append("ASR API未配置")
+
+        if sub is None and allow_local_whisper:
             log.info("降级到本地 Whisper 转写…")
             sub = asr.transcribe_local(info, page)
             attempts.append("本地Whisper转写完成")
 
     if sub is None:
-        if not allow_whisper:
-            raise RuntimeError("该视频无可用字幕，且本地Whisper转写已关闭")
-        raise RuntimeError("未能获取字幕，本地转写也失败。尝试记录: " + "; ".join(attempts))
+        if not allow_api_asr and not allow_local_whisper:
+            raise RuntimeError("该视频无可用字幕，且所有 ASR fallback 都已关闭")
+        raise RuntimeError("未能获取字幕，所有 fallback 均失败。尝试记录: " + "; ".join(attempts))
 
-    transcript = punctuate(sub.segments)            # 纯字幕(带标点)
+    transcript = punctuate(sub.segments)
     preview = transcript[:80] + ("…" if len(transcript) > 80 else "")
     source_label = label(info.source, sub.level)
-    full_text = _with_meta(info, source_label, transcript)  # 给复制/LLM 用，带 metadata 头
-
-    # 摘要（失败返回空串，不影响主流程）
+    full_text = _with_meta(info, source_label, transcript)
     summary = summarize.summarize(info.title, transcript) or ""
     if summary:
         attempts.append("已生成摘要")
 
     path = save_markdown(info, sub, summary=summary)
-
-    # 写入目录索引——只存元数据 + 摘要，**全文不进索引**(留在 .md)，索引保持轻量
     catalog.upsert({
         "video_id": info.video_id,
         "title": info.title,

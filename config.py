@@ -35,6 +35,13 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # 是否启用本地 Whisper 兜底。树莓派等弱算力设备建议关掉（设为 false / 0 / no）
 ENABLE_WHISPER = os.getenv("ENABLE_WHISPER", "true").strip().lower() not in ("0", "false", "no", "")
 
+# ===== 云 ASR 兜底（无字幕视频时用，OpenAI 兼容 /audio/transcriptions）=====
+# 默认硅基流动 + SenseVoiceSmall（免费、中文强）。留空 key 则不启用，无字幕直接回执。
+ASR_ENABLED = os.getenv("ASR_ENABLED", "true").strip().lower() not in ("0", "false", "no", "")
+ASR_API_KEY = os.getenv("ASR_API_KEY", "").strip()
+ASR_BASE_URL = os.getenv("ASR_BASE_URL", "https://api.siliconflow.cn/v1").strip().rstrip("/")
+ASR_MODEL = os.getenv("ASR_MODEL", "FunAudioLLM/SenseVoiceSmall").strip()
+
 # ===== 字幕总结（服务端 LLM，默认 DeepSeek，OpenAI 兼容接口）=====
 SUMMARY_ENABLED = os.getenv("SUMMARY_ENABLED", "true").strip().lower() not in ("0", "false", "no", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()

@@ -51,9 +51,14 @@ def _set(job_id: str, **fields):
 def _process(job_id: str, url: str, force: bool = False):
     _set(job_id, status="processing")
     try:
-        result = run_pipeline(url, allow_whisper=config.ENABLE_WHISPER, force=force)
+        result = run_pipeline(
+            url,
+            allow_api_asr=config.ASR_ENABLED,
+            allow_local_whisper=config.ENABLE_WHISPER,
+            force=force,
+        )
         # 按可靠性给每级字幕配徽标，一眼可辨用了哪个 fallback
-        badge = {"cc": "🟢", "ai": "🔵", "whisper": "🟡"}.get(result.level, "✅")
+        badge = {"cc": "[CC]", "ai": "[AI]", "api": "[API]", "whisper": "[WHISPER]"}.get(result.level, "[OK]")
         dup = "♻️ 已存在 · " if result.duplicate else ""
         head = f"{dup}{badge} {result.source_label} · {result.segment_count}条\n《{result.title}》"
         # 通知正文：有摘要就把摘要带上，扫一眼判断价值
