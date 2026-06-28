@@ -45,7 +45,7 @@ Flask 服务 (server.py)
 需要：Python 3.10+、ffmpeg（已在 PATH）。
 
 ```bash
-cd "E:/Codex Project/Home AI Agent/video_transcript"
+cd video_transcript
 python -m venv .venv
 .venv\Scripts\activate          # PowerShell: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
