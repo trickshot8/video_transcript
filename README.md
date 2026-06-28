@@ -88,6 +88,14 @@ markdown 落在 `output/`，包含：
 - 纯文本字幕
 - 可选摘要
 
+每次实际处理还会在 `_catalog.json` 的 `processing_runs` 中记录各阶段耗时、模型、后端、设备架构和输入规模，单个视频保留最近 20 次。需要比较不同设备时，可在 `.env` 设置易读标签：
+
+```env
+PERF_HOST_LABEL=pi5
+```
+
+使用 `force` 重新处理同一视频即可积累可比较的运行记录；命中去重缓存不会新增记录。
+
 ## iOS 快捷指令
 
 见 [ios/shortcut_setup.md](ios/shortcut_setup.md)。

@@ -2,16 +2,22 @@
 from __future__ import annotations
 
 import logging
+import platform
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
 import config
-from pipeline import asr, bilibili, catalog, summarize, youtube
+from pipeline import asr, bilibili, catalog, perf, summarize, youtube
 from pipeline.markdown import label, punctuate, save_markdown
 from pipeline.models import SubtitleResult, VideoInfo
 
 log = logging.getLogger("transcript")
+
+
+def _elapsed_ms(start: float) -> int:
+    return round((time.perf_counter() - start) * 1000)
 
 
 @dataclass
@@ -106,6 +112,8 @@ def run(
     force_whisper: bool = False,
     force: bool = False,
 ) -> PipelineResult:
+    pipeline_started = time.perf_counter()
+    timings: dict[str, int] = {}
     attempts: list[str] = []
     vid, page, get_info, fetch = _route(raw_url)
 
@@ -114,7 +122,9 @@ def run(
         log.info("命中目录(早)，跳过取信息: %s", vid)
         return hit
 
+    stage_started = time.perf_counter()
     info: VideoInfo = get_info(vid)
+    timings["video_info"] = _elapsed_ms(stage_started)
     log.info("视频[%s]: %s (%s)", info.source, info.title, info.video_id)
 
     hit = _dedup(info.video_id, force, force_whisper)
@@ -126,9 +136,12 @@ def run(
 
     if force_whisper:
         log.info("强制本地 Whisper 转写…")
+        stage_started = time.perf_counter()
         sub = asr.transcribe_local(info, page)
+        timings["local_whisper_total"] = _elapsed_ms(stage_started)
         attempts.append("强制本地Whisper转写")
     else:
+        stage_started = time.perf_counter()
         try:
             sub = fetch(info)
             attempts.append(
@@ -137,9 +150,12 @@ def run(
         except Exception as e:  # noqa: BLE001
             attempts.append(f"字幕抓取异常: {e}")
             log.warning("字幕抓取异常: %s", e)
+        finally:
+            timings["platform_subtitle"] = _elapsed_ms(stage_started)
 
         if sub is None and allow_api_asr:
             if asr.api_available():
+                stage_started = time.perf_counter()
                 try:
                     log.info("降级到云端 ASR API 转写…")
                     sub = asr.transcribe_api(info, page)
@@ -147,12 +163,16 @@ def run(
                 except Exception as e:  # noqa: BLE001
                     attempts.append(f"ASR API转写异常: {e}")
                     log.warning("ASR API转写异常: %s", e)
+                finally:
+                    timings["api_asr_total"] = _elapsed_ms(stage_started)
             else:
                 attempts.append("ASR API未配置")
 
         if sub is None and allow_local_whisper:
             log.info("降级到本地 Whisper 转写…")
+            stage_started = time.perf_counter()
             sub = asr.transcribe_local(info, page)
+            timings["local_whisper_total"] = _elapsed_ms(stage_started)
             attempts.append("本地Whisper转写完成")
 
     if sub is None:
@@ -160,15 +180,25 @@ def run(
             raise RuntimeError("该视频无可用字幕，且所有 ASR fallback 都已关闭")
         raise RuntimeError("未能获取字幕，所有 fallback 均失败。尝试记录: " + "; ".join(attempts))
 
+    timings.update(sub.timings_ms)
+    stage_started = time.perf_counter()
     transcript = punctuate(sub.segments)
+    timings["transcript_format"] = _elapsed_ms(stage_started)
     preview = transcript[:80] + ("…" if len(transcript) > 80 else "")
     source_label = label(info.source, sub.level)
     full_text = _with_meta(info, source_label, transcript)
+
+    stage_started = time.perf_counter()
     summary = summarize.summarize(info.title, transcript) or ""
+    timings["summary"] = _elapsed_ms(stage_started)
     if summary:
         attempts.append("已生成摘要")
 
+    stage_started = time.perf_counter()
     path = save_markdown(info, sub, summary=summary)
+    timings["markdown_save"] = _elapsed_ms(stage_started)
+    total_to_saved_ms = _elapsed_ms(pipeline_started)
+
     catalog.upsert({
         "video_id": info.video_id,
         "title": info.title,
@@ -184,6 +214,45 @@ def run(
         "preview": preview,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
+
+    # 性能记录：非必须，独立追加到 _perf.jsonl，不进 catalog（避免索引膨胀/全量重写）
+    transcript_model = (
+        config.ASR_MODEL if sub.level == "api"
+        else config.WHISPER_MODEL if sub.level == "whisper"
+        else None
+    )
+    perf.log_run({
+        "video_id": info.video_id,
+        "run_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "host_label": config.PERF_HOST_LABEL or platform.machine() or "unknown",
+        "machine": platform.machine(),
+        "python": platform.python_version(),
+        "source_level": sub.level,
+        "video_duration_sec": info.duration,
+        "transcript_chars": len(transcript),
+        "summary_chars": len(summary),
+        "models": {
+            "summary": config.SUMMARY_MODEL if summary else None,
+            "transcript": transcript_model,
+        },
+        "backends": {
+            "summary": config.SUMMARY_BASE_URL if summary else None,
+            "transcript": (
+                config.ASR_BASE_URL if sub.level == "api"
+                else "local" if sub.level == "whisper"
+                else info.source
+            ),
+        },
+        "summary_prompt": summarize.PROMPT_VERSION if summary else None,
+        "stages_ms": timings,
+        "total_to_saved_ms": total_to_saved_ms,
+    })
+    log.info(
+        "耗时[%s]: total=%dms stages=%s",
+        info.video_id,
+        total_to_saved_ms,
+        timings,
+    )
 
     return PipelineResult(
         title=info.title,

@@ -19,6 +19,10 @@ _model = None
 log = logging.getLogger("asr")
 
 
+def _elapsed_ms(start: float) -> int:
+    return round((time.perf_counter() - start) * 1000)
+
+
 def _get_model():
     global _model
     if _model is None:
@@ -193,8 +197,11 @@ def transcribe_api(info: VideoInfo, page: Optional[int] = None) -> SubtitleResul
     if not api_available():
         raise RuntimeError("ASR API is not configured")
 
+    download_started = time.perf_counter()
     audio = download_audio(info, page)
+    timings = {"audio_download": _elapsed_ms(download_started)}
     try:
+        request_started = time.perf_counter()
         with audio.open("rb") as fh:
             content_type = mimetypes.guess_type(audio.name)[0] or "application/octet-stream"
             resp = requests.post(
@@ -211,6 +218,7 @@ def transcribe_api(info: VideoInfo, page: Optional[int] = None) -> SubtitleResul
         resp.raise_for_status()
         payload = resp.json()
         segments = _segments_from_transcription_payload(payload, info.duration)
+        timings["asr_request"] = _elapsed_ms(request_started)
     except requests.HTTPError as exc:
         detail = exc.response.text[:400] if exc.response is not None else str(exc)
         log.warning("ASR API request failed: %s", detail)
@@ -227,13 +235,19 @@ def transcribe_api(info: VideoInfo, page: Optional[int] = None) -> SubtitleResul
         segments=segments,
         level="api",
         lan_doc=f"ASR API · {config.ASR_MODEL}",
+        timings_ms=timings,
     )
 
 
 def transcribe_local(info: VideoInfo, page: Optional[int] = None) -> SubtitleResult:
+    download_started = time.perf_counter()
     audio = download_audio(info, page)
+    timings = {"audio_download": _elapsed_ms(download_started)}
     try:
+        model_started = time.perf_counter()
         model = _get_model()
+        timings["whisper_model_load"] = _elapsed_ms(model_started)
+        inference_started = time.perf_counter()
         segments_iter, _ = model.transcribe(
             str(audio),
             language="zh",
@@ -245,6 +259,7 @@ def transcribe_local(info: VideoInfo, page: Optional[int] = None) -> SubtitleRes
             for s in segments_iter
             if s.text.strip()
         ]
+        timings["whisper_inference"] = _elapsed_ms(inference_started)
     finally:
         try:
             audio.unlink(missing_ok=True)
@@ -256,4 +271,5 @@ def transcribe_local(info: VideoInfo, page: Optional[int] = None) -> SubtitleRes
         segments=segments,
         level="whisper",
         lan_doc=f"本地Whisper·{config.WHISPER_MODEL}",
+        timings_ms=timings,
     )

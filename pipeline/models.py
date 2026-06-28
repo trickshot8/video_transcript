@@ -1,7 +1,7 @@
 """跨来源共享的数据结构（B站 / YouTube 通用）。"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -16,6 +16,7 @@ class SubtitleResult:
     segments: list[Segment]
     level: str          # cc 人工 / ai 自动 / whisper 本地转写
     lan_doc: str        # 语言/来源描述
+    timings_ms: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

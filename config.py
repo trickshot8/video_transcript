@@ -48,6 +48,9 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 SUMMARY_BASE_URL = os.getenv("SUMMARY_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
 SUMMARY_MODEL = os.getenv("SUMMARY_MODEL", "deepseek-chat").strip()
 
+# 性能记录中的设备标签。Docker 部署建议设置为 pi5、mac-mini-m4 等易读名称。
+PERF_HOST_LABEL = os.getenv("PERF_HOST_LABEL", "").strip()
+
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small").strip()
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu").strip()
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip()

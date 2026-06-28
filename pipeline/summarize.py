@@ -12,6 +12,7 @@ import requests
 import config
 
 log = logging.getLogger("summarize")
+PROMPT_VERSION = "content-overview-v1"
 
 _SYSTEM = """你是严谨、中立的视频内容编辑。首要任务是客观还原视频讲了什么、依据是什么、表达方式有什么特点；观看参考只是辅助，不替用户裁决视频值不值得看。
 评价信息时应结合视频类型：知识讲解重视因果与来源，观点评论重视论证，产品实测重视体验与画面，娱乐视频的幽默、互动和演示本身也可能是核心价值。

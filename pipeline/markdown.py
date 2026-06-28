@@ -63,11 +63,13 @@ def render_markdown(info: VideoInfo, sub: SubtitleResult, summary: str = "") -> 
 
     lines.append("---")
     lines.append("")
-    lines.append("## 带时间戳字幕")
-    lines.append("")
-    for seg in sub.segments:
-        lines.append(f"`[{_ts(seg.start)}]` {seg.text}")
-    lines.append("")
+    # API ASR 通常只返回整段无时间戳的文本，带时间戳的区块没有意义，跳过。
+    if sub.level != "api":
+        lines.append("## 带时间戳字幕")
+        lines.append("")
+        for seg in sub.segments:
+            lines.append(f"`[{_ts(seg.start)}]` {seg.text}")
+        lines.append("")
 
     lines.append("## 纯文本")
     lines.append("")

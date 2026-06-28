@@ -1,5 +1,7 @@
 """Offline smoke tests for parsing and rendering."""
-from pipeline import asr, bilibili
+from pathlib import Path
+
+from pipeline import asr, bilibili, transcript
 from pipeline.markdown import _safe_filename, _ts, render_markdown
 from pipeline.models import Segment, SubtitleResult, VideoInfo
 
@@ -76,10 +78,68 @@ def test_asr_payload_parser():
     print("asr_payload_parser ✅")
 
 
+def test_processing_metrics():
+    catalog_saved: dict = {}
+    perf_logged: dict = {}
+    originals = (
+        bilibili.get_video_info,
+        bilibili.fetch_bilibili_subtitle,
+        transcript.summarize.summarize,
+        transcript.save_markdown,
+        transcript.catalog.get,
+        transcript.catalog.upsert,
+        transcript.perf.log_run,
+    )
+    try:
+        bilibili.get_video_info = lambda video_id, page=None: VideoInfo(
+            video_id=video_id,
+            source="bilibili",
+            title="性能测试",
+            url=f"https://www.bilibili.com/video/{video_id}",
+            duration=60,
+        )
+        bilibili.fetch_bilibili_subtitle = lambda info: SubtitleResult(
+            segments=[Segment(0, 10, "测试字幕")],
+            level="ai",
+            lan_doc="中文(自动生成)",
+        )
+        transcript.summarize.summarize = lambda title, text: "测试摘要"
+        transcript.save_markdown = lambda info, sub, summary="": Path("test.md")
+        transcript.catalog.get = lambda video_id: None
+        transcript.catalog.upsert = lambda entry: catalog_saved.update(entry)
+        transcript.perf.log_run = lambda entry: perf_logged.update(entry)
+
+        result = transcript.run("BV1xx411c7mD", force=True)
+
+        # 性能记录进了独立的 perf 日志，不进 catalog
+        assert "processing_runs" not in catalog_saved
+        assert perf_logged["source_level"] == "ai"
+        assert perf_logged["video_duration_sec"] == 60
+        assert perf_logged["transcript_chars"] > 0
+        assert perf_logged["backends"]["summary"]
+        assert perf_logged["summary_prompt"] == transcript.summarize.PROMPT_VERSION
+        assert "video_info" in perf_logged["stages_ms"]
+        assert "platform_subtitle" in perf_logged["stages_ms"]
+        assert "summary" in perf_logged["stages_ms"]
+        assert "markdown_save" in perf_logged["stages_ms"]
+        assert not hasattr(result, "timings_ms")
+    finally:
+        (
+            bilibili.get_video_info,
+            bilibili.fetch_bilibili_subtitle,
+            transcript.summarize.summarize,
+            transcript.save_markdown,
+            transcript.catalog.get,
+            transcript.catalog.upsert,
+            transcript.perf.log_run,
+        ) = originals
+    print("processing_metrics ✅")
+
 if __name__ == "__main__":
     test_resolve_url()
     test_ts()
     test_safe_filename()
     test_render()
     test_asr_payload_parser()
+    test_processing_metrics()
     print("\n全部冒烟测试通过 ✅")
