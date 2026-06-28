@@ -93,7 +93,7 @@ def _find_ffmpeg() -> Optional[str]:
     return None
 
 def download_audio(info: VideoInfo, page: Optional[int] = None) -> Path:
-    """Download audio as a compact 16 kHz mono MP3 for ASR."""
+    """Download a low-bitrate audio track and compress it further when possible."""
     import yt_dlp
 
     url = info.url
@@ -102,7 +102,10 @@ def download_audio(info: VideoInfo, page: Optional[int] = None) -> Path:
 
     out_base = config.TMP_DIR / f"{info.video_id}_{page or 1}_{int(time.time())}"
     opts = {
-        "format": "bestaudio/best",
+        "format": (
+            "bestaudio[ext=m4a][abr<=96]/worstaudio[ext=m4a]/"
+            "bestaudio[abr<=96]/worstaudio/bestaudio/best"
+        ),
         "outtmpl": str(out_base) + ".%(ext)s",
         "quiet": True,
         "no_warnings": True,
