@@ -1,6 +1,7 @@
 """本地兜底：yt-dlp 下载音频 -> faster-whisper 转写中文。"""
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -70,7 +71,8 @@ def download_audio(info: VideoInfo, page: Optional[int] = None) -> Path:
         cookiefile = _write_cookiefile()
         if cookiefile:
             opts["cookiefile"] = cookiefile
-    elif info.source == "youtube" and config.YOUTUBE_COOKIES:
+    elif (info.source == "youtube" and config.YOUTUBE_COOKIES
+          and os.path.exists(config.YOUTUBE_COOKIES)):
         opts["cookiefile"] = config.YOUTUBE_COOKIES
 
     with yt_dlp.YoutubeDL(opts) as ydl:

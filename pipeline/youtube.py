@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from typing import Optional
@@ -34,7 +35,8 @@ def _base_opts() -> dict:
         "extractor_retries": 3,
         "retries": 3,
     }
-    if config.YOUTUBE_COOKIES:
+    # 仅当 cookies 文件确实存在时才用——路径设了但文件没放也不会报错
+    if config.YOUTUBE_COOKIES and os.path.exists(config.YOUTUBE_COOKIES):
         opts["cookiefile"] = config.YOUTUBE_COOKIES
     return opts
 

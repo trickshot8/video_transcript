@@ -13,12 +13,16 @@ services:
     environment:
       ENABLE_WHISPER: "false"
       OUTPUT_DIR: /data/subtitles
+      # 放了 cookies 文件才会用，没放也不报错（代码里判存在）
+      YOUTUBE_COOKIES: /app/cookies/youtube.txt
     volumes:
       # 左边 = 树莓派上「被 CasaOS 共享成 W: 的那个本地文件夹」的物理路径。
       # 容器写到这里 = 直接落 Pi 本地 SSD，立刻出现在 W: 和手机共享里。
       # 用 :? 强制必填——没在 .env 设 OUTPUT_HOST_DIR 就直接报错，
       # 避免静默回退到 ./output 把字幕写错地方（曾经的坑）。
       - ${OUTPUT_HOST_DIR:?请在 .env 里设 OUTPUT_HOST_DIR=宿主机输出目录(Docker部署必填)}:/data/subtitles
+      # YouTube cookies 目录(可选)：把 youtube.txt 放进项目下的 cookies/ 即生效
+      - ${COOKIES_DIR:-./cookies}:/app/cookies:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8765/health').status==200 else 1)"]
       interval: 30s
