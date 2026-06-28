@@ -63,7 +63,7 @@ def _process(job_id: str, url: str, force: bool = False):
              summary=result.summary, filename=result.filename,
              duplicate=result.duplicate, result={
                 "title": result.title,
-                "bvid": result.bvid,
+                "video_id": result.video_id,
                 "level": result.level,
                 "source": result.source_label,
                 "segments": result.segment_count,

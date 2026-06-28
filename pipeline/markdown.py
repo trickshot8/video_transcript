@@ -6,13 +6,17 @@ from datetime import datetime
 from pathlib import Path
 
 import config
-from pipeline.bilibili import Segment, SubtitleResult, VideoInfo
+from pipeline.models import Segment, SubtitleResult, VideoInfo
 
-LEVEL_LABEL = {
-    "cc": "B站CC字幕(人工)",
-    "ai": "B站AI字幕",
-    "whisper": "本地Whisper转写",
+# 来源 + 级别 -> 中文标签
+_LABELS = {
+    "bilibili": {"cc": "B站CC字幕(人工)", "ai": "B站AI字幕", "whisper": "本地Whisper转写"},
+    "youtube": {"cc": "YouTube字幕", "ai": "YouTube自动字幕", "whisper": "本地Whisper转写"},
 }
+
+
+def label(source: str, level: str) -> str:
+    return _LABELS.get(source, {}).get(level, level)
 
 
 def _ts(seconds: float) -> str:
@@ -35,10 +39,10 @@ def render_markdown(info: VideoInfo, sub: SubtitleResult, summary: str = "") -> 
     if info.page_title and info.page_title != info.title:
         lines.append(f"## {info.page_title}")
     lines.append("")
-    lines.append(f"- 视频: https://www.bilibili.com/video/{info.bvid}")
+    lines.append(f"- 视频: {info.url}")
     if info.owner:
-        lines.append(f"- UP主: {info.owner}")
-    lines.append(f"- 字幕来源: {LEVEL_LABEL.get(sub.level, sub.level)}"
+        lines.append(f"- {'UP主' if info.source == 'bilibili' else '频道'}: {info.owner}")
+    lines.append(f"- 字幕来源: {label(info.source, sub.level)}"
                  + (f"（{sub.lan_doc}）" if sub.lan_doc else ""))
     lines.append(f"- 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("")

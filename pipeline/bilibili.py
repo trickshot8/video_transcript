@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
@@ -15,6 +14,7 @@ import requests
 
 import config
 from pipeline import wbi
+from pipeline.models import Segment, SubtitleResult, VideoInfo
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -25,30 +25,6 @@ BV_RE = re.compile(r"(BV[0-9A-Za-z]{10})")
 AV_RE = re.compile(r"av(\d+)", re.IGNORECASE)
 # 短链域名: b23.tv（App 主用）/ bili2233.cn（备用）；只取短码字符，避免吞掉后面紧跟的中文
 B23_RE = re.compile(r"https?://(?:b23\.tv|bili2233\.cn)/[A-Za-z0-9]+", re.IGNORECASE)
-
-
-@dataclass
-class Segment:
-    start: float  # 秒
-    end: float
-    text: str
-
-
-@dataclass
-class SubtitleResult:
-    segments: list[Segment]
-    level: str          # "cc" 人工字幕 / "ai" AI字幕
-    lan_doc: str        # 语言描述，如 "中文(中国)"
-
-
-@dataclass
-class VideoInfo:
-    bvid: str
-    cid: int
-    title: str
-    page_title: str
-    owner: str
-    duration: int       # 秒
 
 
 def _session() -> requests.Session:
@@ -124,8 +100,11 @@ def get_video_info(vid: str, page: Optional[int] = None) -> VideoInfo:
         sel = pages[0]
     cid = sel["cid"] if sel else d["cid"]
     page_title = sel.get("part", "") if sel else ""
+    bvid = d["bvid"]
     return VideoInfo(
-        bvid=d["bvid"],
+        video_id=bvid,
+        source="bilibili",
+        url=f"https://www.bilibili.com/video/{bvid}",
         cid=int(cid),
         title=d.get("title", ""),
         page_title=page_title or d.get("title", ""),
@@ -146,7 +125,7 @@ def fetch_bilibili_subtitle(info: VideoInfo) -> Optional[SubtitleResult]:
     必须用 WBI 签名的 wbi/v2 接口：未签名的旧 player/v2 会被风控返回错乱字幕。
     """
     s = _session()
-    params = wbi.sign({"bvid": info.bvid, "cid": info.cid}, s)
+    params = wbi.sign({"bvid": info.video_id, "cid": info.cid}, s)
     r = s.get(
         "https://api.bilibili.com/x/player/wbi/v2",
         params=params,

@@ -3,7 +3,7 @@
   python tests_smoke.py
 """
 from pipeline import bilibili
-from pipeline.bilibili import Segment, SubtitleResult, VideoInfo
+from pipeline.models import Segment, SubtitleResult, VideoInfo
 from pipeline.markdown import render_markdown, _ts, _safe_filename
 
 
@@ -38,7 +38,9 @@ def test_safe_filename():
 
 
 def test_render():
-    info = VideoInfo(bvid="BV1xx411c7mD", cid=123, title="测试视频",
+    info = VideoInfo(video_id="BV1xx411c7mD", source="bilibili",
+                     url="https://www.bilibili.com/video/BV1xx411c7mD",
+                     cid=123, title="测试视频",
                      page_title="第一P", owner="某UP", duration=120)
     sub = SubtitleResult(
         segments=[Segment(0, 2, "大家好"), Segment(2, 5, "今天我们聊聊")],

@@ -1,5 +1,7 @@
 # 树莓派/弱算力设备用：关闭本地 Whisper（.env 设 ENABLE_WHISPER=false）时的精简依赖。
-# 不含 faster-whisper / ctranslate2 / yt-dlp（避免 ARM 上的编译麻烦）。
+# 不含 faster-whisper / ctranslate2（避免 ARM 上的编译麻烦）。
+# yt-dlp 需要：YouTube 字幕抓取用它（纯 Python，轻量）。
 flask>=3.0.0
 requests>=2.31
 python-dotenv>=1.0.0
+yt-dlp>=2024.0.0

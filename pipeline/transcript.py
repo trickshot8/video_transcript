@@ -1,4 +1,4 @@
-"""三级 fallback 编排：B站CC字幕 -> B站AI字幕 -> 本地Whisper。"""
+"""多来源编排：B站 / YouTube → CC字幕 → 自动字幕 → 本地Whisper。"""
 from __future__ import annotations
 
 import logging
@@ -7,8 +7,9 @@ from datetime import datetime
 from typing import Optional
 
 import config
-from pipeline import asr, bilibili, catalog, summarize
-from pipeline.markdown import LEVEL_LABEL, punctuate, save_markdown
+from pipeline import asr, bilibili, catalog, summarize, youtube
+from pipeline.markdown import label, punctuate, save_markdown
+from pipeline.models import SubtitleResult, VideoInfo
 
 log = logging.getLogger("transcript")
 
@@ -16,7 +17,7 @@ log = logging.getLogger("transcript")
 @dataclass
 class PipelineResult:
     title: str
-    bvid: str
+    video_id: str
     level: str               # cc / ai / whisper
     source_label: str
     segment_count: int
@@ -29,16 +30,13 @@ class PipelineResult:
     attempts: list[str] = field(default_factory=list)
 
 
-def _video_url(info: bilibili.VideoInfo) -> str:
-    return f"https://www.bilibili.com/video/{info.bvid}"
-
-
-def _with_meta(info: bilibili.VideoInfo, source_label: str, transcript: str) -> str:
+def _with_meta(info: VideoInfo, source_label: str, transcript: str) -> str:
     """给全文加上 metadata 头，喂 LLM 时自带上下文。"""
+    owner_label = "UP主" if info.source == "bilibili" else "频道"
     lines = [f"《{info.title}》"]
     if info.owner:
-        lines.append(f"UP主：{info.owner}")
-    lines.append(f"来源：{_video_url(info)}")
+        lines.append(f"{owner_label}：{info.owner}")
+    lines.append(f"来源：{info.url}")
     lines.append(f"字幕来源：{source_label}")
     return "\n".join(lines) + "\n\n" + transcript
 
@@ -56,7 +54,7 @@ def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[Pipeline
     text = entry.get("text", "")
     return PipelineResult(
         title=entry.get("title", ""),
-        bvid=video_id,
+        video_id=video_id,
         level=entry.get("level", ""),
         source_label=entry.get("source_label", ""),
         segment_count=entry.get("segment_count", 0),
@@ -70,44 +68,52 @@ def _dedup(video_id: str, force: bool, force_whisper: bool) -> Optional[Pipeline
     )
 
 
+def _route(raw_url: str):
+    """来源路由 → (video_id, page, get_info_fn, fetch_fn)。"""
+    if youtube.is_youtube(raw_url):
+        vid = youtube.extract_id(raw_url)
+        return vid, None, youtube.get_video_info, youtube.fetch_subtitle
+    vid, page = bilibili.resolve_url(raw_url)
+    return (vid, page,
+            lambda v: bilibili.get_video_info(v, page),
+            bilibili.fetch_bilibili_subtitle)
+
+
 def run(raw_url: str, allow_whisper: bool = True,
         force_whisper: bool = False, force: bool = False) -> PipelineResult:
     attempts: list[str] = []
-    vid, page = bilibili.resolve_url(raw_url)
+    vid, page, get_info, fetch = _route(raw_url)
 
-    # 早去重：resolve 已拿到 BV 号，直接查本地目录，命中就返回——**不调 view API、不联网**
+    # 早去重：用解析出的 ID 直接查本地目录，命中就返回——不取信息、尽量不联网
     hit = _dedup(vid, force, force_whisper)
     if hit:
         log.info("命中目录(早)，跳过取信息: %s", vid)
         return hit
 
-    info = bilibili.get_video_info(vid, page)
-    log.info("视频: %s (%s) cid=%s", info.title, info.bvid, info.cid)
+    info: VideoInfo = get_info(vid)
+    log.info("视频[%s]: %s (%s)", info.source, info.title, info.video_id)
 
-    # 兜底再查一次：处理 av 号等 vid != 规范 bvid 的情况
-    hit = _dedup(info.bvid, force, force_whisper)
+    # 兜底再查一次：处理 ID 规范化后不同的情况（如 av 号）
+    hit = _dedup(info.video_id, force, force_whisper)
     if hit:
-        log.info("命中目录，返回已有: %s", info.bvid)
+        log.info("命中目录，返回已有: %s", info.video_id)
         return hit
 
-    sub: Optional[bilibili.SubtitleResult] = None
+    sub: Optional[SubtitleResult] = None
 
-    # force_whisper：跳过B站字幕，直接本地转写（用于对比/测试）
     if force_whisper:
         log.info("强制本地 Whisper 转写…")
         sub = asr.transcribe_local(info, page)
         attempts.append("强制本地Whisper转写")
     else:
-        # 1+2 级：B站字幕（内部已优先CC，其次AI）
+        # 1+2 级：平台字幕（内部已优先人工，其次自动）
         try:
-            sub = bilibili.fetch_bilibili_subtitle(info)
-            if sub:
-                attempts.append(f"B站{sub.level}字幕命中")
-            else:
-                attempts.append("B站无可用字幕")
+            sub = fetch(info)
+            attempts.append(f"{info.source}{sub.level}字幕命中" if sub
+                            else f"{info.source}无可用字幕")
         except Exception as e:  # noqa: BLE001  网络/接口异常都降级
-            attempts.append(f"B站字幕抓取异常: {e}")
-            log.warning("B站字幕抓取异常: %s", e)
+            attempts.append(f"字幕抓取异常: {e}")
+            log.warning("字幕抓取异常: %s", e)
 
         # 3 级：本地 whisper
         if sub is None and allow_whisper:
@@ -117,12 +123,12 @@ def run(raw_url: str, allow_whisper: bool = True,
 
     if sub is None:
         if not allow_whisper:
-            raise RuntimeError("该视频无B站字幕，且本地Whisper转写已关闭")
+            raise RuntimeError("该视频无可用字幕，且本地Whisper转写已关闭")
         raise RuntimeError("未能获取字幕，本地转写也失败。尝试记录: " + "; ".join(attempts))
 
     transcript = punctuate(sub.segments)            # 纯字幕(带标点)
     preview = transcript[:80] + ("…" if len(transcript) > 80 else "")
-    source_label = LEVEL_LABEL.get(sub.level, sub.level)
+    source_label = label(info.source, sub.level)
     full_text = _with_meta(info, source_label, transcript)  # 给复制/LLM 用，带 metadata 头
 
     # 摘要（失败返回空串，不影响主流程）
@@ -134,11 +140,11 @@ def run(raw_url: str, allow_whisper: bool = True,
 
     # 写入目录索引（去重 + 检索的单一数据源）
     catalog.upsert({
-        "video_id": info.bvid,
+        "video_id": info.video_id,
         "title": info.title,
         "owner": info.owner,
-        "source": "bilibili",
-        "url": _video_url(info),
+        "source": info.source,
+        "url": info.url,
         "level": sub.level,
         "source_label": source_label,
         "segment_count": len(sub.segments),
@@ -152,7 +158,7 @@ def run(raw_url: str, allow_whisper: bool = True,
 
     return PipelineResult(
         title=info.title,
-        bvid=info.bvid,
+        video_id=info.video_id,
         level=sub.level,
         source_label=source_label,
         segment_count=len(sub.segments),

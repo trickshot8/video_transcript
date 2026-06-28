@@ -20,6 +20,10 @@ BASE_DIR = Path(__file__).resolve().parent
 
 BILIBILI_SESSDATA = os.getenv("BILIBILI_SESSDATA", "").strip()
 
+# YouTube cookies 文件路径(Netscape 格式)。YouTube 对字幕下载限流较狠，
+# 提供登录态 cookies 可大幅缓解 429。留空则不带 cookies。
+YOUTUBE_COOKIES = os.getenv("YOUTUBE_COOKIES", "").strip()
+
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8765"))
 API_TOKEN = os.getenv("API_TOKEN", "").strip()
